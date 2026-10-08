@@ -160,7 +160,7 @@ export default function DocumentDetailPage() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => setShowReviewForm(true)} className="btn btn-primary">Request Change</button>
+          <button onClick={() => { setShowReviewForm(true); setActiveTab('reviews'); }} className="btn btn-primary">Request Change</button>
         </div>
       </div>
 

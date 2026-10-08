@@ -145,5 +145,6 @@ npm test
 # Frontend  
 cd frontend
 npm install
+npm test   # Vitest + Testing Library (jsdom)
 VITE_API_URL=https://your-api-url npm run dev
 ```
