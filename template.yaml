@@ -1,0 +1,286 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 9To5ive New - Knowledge Base Management and Documentation Coherence Platform
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Timeout: 60
+    MemorySize: 512
+    Environment:
+      Variables:
+        DOCUMENTS_TABLE: !Ref DocumentsTable
+        VERSIONS_TABLE: !Ref VersionsTable
+        AUDIT_TABLE: !Ref AuditTable
+        REVIEW_CYCLES_TABLE: !Ref ReviewCyclesTable
+        GRAPH_TABLE: !Ref GraphTable
+        BEDROCK_MODEL_ID: apac.anthropic.claude-3-haiku-20240307-v1:0
+        AWS_REGION_OVERRIDE: ap-southeast-1
+
+Resources:
+
+  # ─────────── DynamoDB Tables ───────────
+
+  DocumentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: app-hackatho-rise94f7a1bc-documents
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: documentId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: documentId
+          KeyType: HASH
+
+  VersionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: app-hackatho-rise94f7a1bc-versions
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: documentId
+          AttributeType: S
+        - AttributeName: versionNumber
+          AttributeType: N
+      KeySchema:
+        - AttributeName: documentId
+          KeyType: HASH
+        - AttributeName: versionNumber
+          KeyType: RANGE
+
+  AuditTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    Properties:
+      TableName: app-hackatho-rise94f7a1bc-audit
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: documentId
+          AttributeType: S
+        - AttributeName: auditId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: documentId
+          KeyType: HASH
+        - AttributeName: auditId
+          KeyType: RANGE
+
+  ReviewCyclesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: app-hackatho-rise94f7a1bc-review-cycles
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: reviewCycleId
+          AttributeType: S
+        - AttributeName: documentId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: reviewCycleId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: documentId-index
+          KeySchema:
+            - AttributeName: documentId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  GraphTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: app-hackatho-rise94f7a1bc-graph
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: fromDocumentId
+          AttributeType: S
+        - AttributeName: sortKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: fromDocumentId
+          KeyType: HASH
+        - AttributeName: sortKey
+          KeyType: RANGE
+
+  # ─────────── IAM Role ───────────
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: app-hackatho-rise94f7a1bc-lambda-role
+      PermissionsBoundary: arn:aws:iam::299952487187:policy/rise-prod-deploy-boundary-v2
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: app-hackatho-rise94f7a1bc-lambda-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt DocumentsTable.Arn
+                  - !GetAtt VersionsTable.Arn
+                  - !GetAtt AuditTable.Arn
+                  - !GetAtt ReviewCyclesTable.Arn
+                  - !GetAtt GraphTable.Arn
+                  - !Sub '${ReviewCyclesTable.Arn}/index/*'
+                  - !Sub '${AuditTable.Arn}/index/*'
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: '*'
+
+  # ─────────── Lambda Function ───────────
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: app-hackatho-rise94f7a1bc-api
+      Handler: index.handler
+      CodeUri: backend/
+      Role: !GetAtt LambdaRole.Arn
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: ANY
+            Path: /{proxy+}
+        RootApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: ANY
+            Path: /
+
+  # ─────────── HTTP API Gateway ───────────
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowHeaders:
+          - '*'
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+
+  # ─────────── S3 Frontend Bucket ───────────
+
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: app-hackatho-rise94f7a1bc-frontend
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}'
+
+  # ─────────── CloudFront OAC ───────────
+
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: app-hackatho-rise94f7a1bc-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # ─────────── CloudFront Distribution ───────────
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        DefaultRootObject: index.html
+        Enabled: true
+        HttpVersion: http2
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+
+Outputs:
+  ApiUrl:
+    Description: HTTP API Gateway URL
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiUrl'
+
+  FrontendUrl:
+    Description: CloudFront Distribution URL
+    Value: !Sub 'https://${CloudFrontDistribution.DomainName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-FrontendUrl'
+
+  DistributionId:
+    Description: CloudFront Distribution ID
+    Value: !Ref CloudFrontDistribution
+    Export:
+      Name: !Sub '${AWS::StackName}-DistributionId'
+
+  FrontendBucketName:
+    Description: S3 Frontend Bucket Name
+    Value: !Ref FrontendBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-FrontendBucket'

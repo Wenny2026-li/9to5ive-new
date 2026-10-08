@@ -1,0 +1,19 @@
+{
+  "name": "9to5ive-backend",
+  "version": "1.0.0",
+  "description": "Knowledge Base Management Platform Backend",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.0.0",
+    "@aws-sdk/client-dynamodb": "^3.0.0",
+    "@aws-sdk/lib-dynamodb": "^3.0.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
